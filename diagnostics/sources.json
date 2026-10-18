@@ -1,0 +1,9 @@
+{
+  "repository": "taowen/proton-ge-custom",
+  "revision": "88e17853d92d4ce114ffa6d757b2d521cdf2724b",
+  "path": "tests/arlinux",
+  "files": {
+    "exception-observer.c": "d42cc0363cf041204926a1a2a3998383699c1c4d3e6ce77f76aecdcabd7fe099",
+    "exception-observer-probe.c": "767b543a63996c44d3f99deb8aa3a29314661f3dcd14142ab1e995f2fea94240"
+  }
+}
