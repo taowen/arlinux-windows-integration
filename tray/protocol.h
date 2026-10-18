@@ -9,6 +9,7 @@
 #define ARLINUX_TRAY_LIST 1
 #define ARLINUX_TRAY_OPEN 2
 #define ARLINUX_TRAY_MENU 3
+#define ARLINUX_TRAY_WINDOW 4
 struct arlinux_tray_request {
     DWORD version, operation, process, reserved;
     ULONGLONG token;

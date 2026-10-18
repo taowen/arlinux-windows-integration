@@ -7,5 +7,5 @@ compiler="$(realpath "$1")/aarch64-w64-mingw32-clang++"
 output="$(realpath -m "$2")"
 mkdir -p "$output"
 "$compiler" -std=c++17 -static -Wall -Wextra -Werror "$repo/tray/windows-tray.cpp" \
-    -luser32 -Wl,--no-insert-timestamp -o "$output/windows-tray.exe"
+    -luser32 -lshell32 -Wl,--no-insert-timestamp -o "$output/windows-tray.exe"
 sha256sum "$output/windows-tray.exe"
