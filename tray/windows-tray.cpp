@@ -69,12 +69,15 @@ static int task(int argc, wchar_t **argv) {
         if (!job) return 3;
         BOOL success = FALSE;
         if (std::wstring(argv[1]) == L"--stop") success = TerminateJobObject(job, 1);
-        else if (std::wstring(argv[1]) == L"--focus") {
+        else {
             focus_request request{job, nullptr, 0};
             EnumWindows(find_owned_window, reinterpret_cast<LPARAM>(&request));
             if (request.window) {
-                ShowWindow(request.window, SW_RESTORE);
-                success = SetForegroundWindow(request.window);
+                if (std::wstring(argv[1]) == L"--close-window") success = PostMessageW(request.window, WM_CLOSE, 0, 0);
+                else {
+                    ShowWindow(request.window, std::wstring(argv[1]) == L"--maximize" && !IsZoomed(request.window) ? SW_MAXIMIZE : SW_RESTORE);
+                    success = SetForegroundWindow(request.window);
+                }
             }
         }
         CloseHandle(job);
@@ -116,7 +119,8 @@ static int task(int argc, wchar_t **argv) {
     return static_cast<int>(status);
 }
 int main(int argc, char **argv) {
-    if (argc > 1 && (strcmp(argv[1], "--run") == 0 || strcmp(argv[1], "--stop") == 0 || strcmp(argv[1], "--focus") == 0)) {
+    if (argc > 1 && (strcmp(argv[1], "--run") == 0 || strcmp(argv[1], "--stop") == 0 || strcmp(argv[1], "--focus") == 0 ||
+                     strcmp(argv[1], "--maximize") == 0 || strcmp(argv[1], "--close-window") == 0)) {
         int count; wchar_t **wide = CommandLineToArgvW(GetCommandLineW(), &count);
         if (!wide) return 2;
         int result = task(count, wide); LocalFree(wide); return result;
