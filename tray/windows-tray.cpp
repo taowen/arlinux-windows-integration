@@ -38,6 +38,16 @@ static BOOL CALLBACK find_owned_window(HWND window, LPARAM param) {
     }
     return TRUE;
 }
+static HWND activation_window(HWND window) {
+    // A disabled owner must yield focus to its active modal popup. Restoring
+    // the owner itself can put it above the dialog while leaving it disabled.
+    while (!IsWindowEnabled(window)) {
+        HWND popup = GetLastActivePopup(window);
+        if (!popup || popup == window || !IsWindowVisible(popup)) break;
+        window = popup;
+    }
+    return window;
+}
 static int task(int argc, wchar_t **argv) {
     if (argc < 3 || wcslen(argv[2]) != 36 || wcsspn(argv[2], L"0123456789abcdef-") != 36) return 2;
     std::wstring name = L"Local\\ARLinux.Task." + std::wstring(argv[2]);
@@ -50,14 +60,16 @@ static int task(int argc, wchar_t **argv) {
             focus_request request{job, nullptr, 0, 0, false};
             EnumWindows(find_owned_window, reinterpret_cast<LPARAM>(&request));
             if (request.window) {
-                if (std::wstring(argv[1]) == L"--close-window") success = PostMessageW(request.window, WM_CLOSE, 0, 0);
+                if (std::wstring(argv[1]) == L"--close-window" && IsWindowEnabled(request.window))
+                    success = PostMessageW(request.window, WM_CLOSE, 0, 0);
                 else {
                     const bool maximize = std::wstring(argv[1]) == L"--maximize";
                     const bool zoom = maximize && !IsZoomed(request.window);
                     if (maximize) ShowWindow(request.window, zoom ? SW_MAXIMIZE : SW_RESTORE);
                     else if (IsIconic(request.window)) ShowWindow(request.window, SW_RESTORE);
                     else if (!IsWindowVisible(request.window)) ShowWindow(request.window, SW_SHOW);
-                    BOOL activated = GetForegroundWindow() == request.window || SetForegroundWindow(request.window);
+                    HWND target = activation_window(request.window);
+                    BOOL activated = GetForegroundWindow() == target || SetForegroundWindow(target);
                     if (!activated) std::fprintf(stderr, "Task foreground activation was denied\n");
                     // Foreground policy is independent of a completed size change.
                     // ShowWindow's return value is prior visibility, not success.
