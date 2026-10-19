@@ -111,6 +111,16 @@ int main() {
     wchar_t **arguments = CommandLineToArgvW(GetCommandLineW(), &count);
     if (!arguments) return 2;
     const std::wstring operation = count > 1 ? arguments[1] : L"";
+    if (operation == L"--prepare-desktop" && count == 2) {
+        // Initializing User32's message-window host starts Wine's shared
+        // Explorer before any application is assigned to a Job Object.
+        HWND window = CreateWindowW(L"STATIC", L"", 0, 0, 0, 0, 0,
+                                    HWND_MESSAGE, nullptr, GetModuleHandleW(nullptr), nullptr);
+        const bool ready = window && FindWindowW(L"Shell_TrayWnd", nullptr);
+        if (window) DestroyWindow(window);
+        LocalFree(arguments);
+        return ready ? 0 : 10;
+    }
     const bool valid = operation == L"--run" || operation == L"--stop" ||
                        operation == L"--focus" || operation == L"--maximize" ||
                        operation == L"--close-window";
