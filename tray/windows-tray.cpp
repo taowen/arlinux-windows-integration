@@ -47,7 +47,7 @@ static std::wstring quote(const std::wstring &value) {
     result.append(slashes * 2, L'\\');
     return result + L'"';
 }
-struct focus_request { HANDLE job; HWND window; LONGLONG area; DWORD query_error; };
+struct focus_request { HANDLE job; HWND window; LONGLONG area; DWORD query_error; bool visible; };
 static BOOL CALLBACK find_owned_window(HWND window, LPARAM param) {
     auto *request = reinterpret_cast<focus_request *>(param);
     DWORD pid; GetWindowThreadProcessId(window, &pid);
@@ -58,10 +58,14 @@ static BOOL CALLBACK find_owned_window(HWND window, LPARAM param) {
         CloseHandle(process);
     } else request->query_error = GetLastError();
     if (!member || GetWindowTextLengthW(window) == 0 || GetWindow(window, GW_OWNER) ||
-        (GetWindowLongPtrW(window, GWL_EXSTYLE) & WS_EX_TOOLWINDOW)) return TRUE;
+        (GetWindowLongPtrW(window, GWL_EXSTYLE) & (WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE))) return TRUE;
     RECT rect{}; GetWindowRect(window, &rect);
     LONGLONG area = static_cast<LONGLONG>(rect.right - rect.left) * (rect.bottom - rect.top);
-    if (!request->window || area > request->area) { request->window = window; request->area = area; }
+    bool visible = IsWindowVisible(window) != FALSE;
+    if (!request->window || (visible && !request->visible) ||
+        (visible == request->visible && area > request->area)) {
+        request->window = window; request->area = area; request->visible = visible;
+    }
     return TRUE;
 }
 static int task(int argc, wchar_t **argv) {
@@ -73,14 +77,22 @@ static int task(int argc, wchar_t **argv) {
         BOOL success = FALSE;
         if (std::wstring(argv[1]) == L"--stop") success = TerminateJobObject(job, 1);
         else {
-            focus_request request{job, nullptr, 0, 0};
+            focus_request request{job, nullptr, 0, 0, false};
             EnumWindows(find_owned_window, reinterpret_cast<LPARAM>(&request));
             if (request.window) {
                 if (std::wstring(argv[1]) == L"--close-window") success = PostMessageW(request.window, WM_CLOSE, 0, 0);
                 else {
-                    ShowWindow(request.window, std::wstring(argv[1]) == L"--maximize" && !IsZoomed(request.window) ? SW_MAXIMIZE : SW_RESTORE);
-                    success = SetForegroundWindow(request.window);
-                    if (!success) std::fprintf(stderr, "Task foreground activation was denied\n");
+                    const bool maximize = std::wstring(argv[1]) == L"--maximize";
+                    const bool zoom = maximize && !IsZoomed(request.window);
+                    ShowWindow(request.window, zoom ? SW_MAXIMIZE : SW_RESTORE);
+                    BOOL activated = GetForegroundWindow() == request.window || SetForegroundWindow(request.window);
+                    if (!activated) std::fprintf(stderr, "Task foreground activation was denied\n");
+                    // Foreground policy is independent of a completed size change.
+                    // ShowWindow's return value is prior visibility, not success.
+                    success = maximize ? (IsZoomed(request.window) != FALSE) == zoom : activated;
+                    std::fprintf(stderr, "Task window control hwnd=%p style=%08lx exstyle=%08lx resized=%d activated=%d\n",
+                                 static_cast<void *>(request.window), GetWindowLongW(request.window, GWL_STYLE),
+                                 GetWindowLongW(request.window, GWL_EXSTYLE), maximize && success, activated);
                 }
             } else std::fprintf(stderr, "Task has no normal owned window (process query error %lu)\n", request.query_error);
         }
