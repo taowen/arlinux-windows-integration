@@ -71,6 +71,9 @@ static int task(int argc, wchar_t **argv) {
                     else if (IsIconic(request.window)) ShowWindow(request.window, SW_RESTORE);
                     else if (!IsWindowVisible(request.window)) ShowWindow(request.window, SW_SHOW);
                     HWND target = activation_window(request.window);
+                    // Request activation even if Wine still considers this the
+                    // foreground HWND after focus moved to a non-Windows app.
+                    BringWindowToTop(target);
                     BOOL activated = GetForegroundWindow() == target || SetForegroundWindow(target);
                     if (!activated) std::fprintf(stderr, "Task foreground activation was denied\n");
                     // Foreground policy is independent of a completed size change.
