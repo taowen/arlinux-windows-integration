@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Build the product shell tray client (independent of MSAA).
+# Build the Windows Job Object task owner (independent of MSAA).
 set -euo pipefail
 [[ $# == 2 ]] || { echo 'Usage: windows-tray.sh LLVM_MINGW_BIN OUTPUT_DIR' >&2; exit 2; }
 repo="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
