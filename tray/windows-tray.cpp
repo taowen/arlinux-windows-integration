@@ -5,6 +5,8 @@
 #include <string>
 #include <vector>
 static std::wstring quote(const std::wstring &value) {
+    // Some Windows programs parse switches directly from the raw command line.
+    if (!value.empty() && value.find_first_of(L" \t\r\n\v\f\"") == std::wstring::npos) return value;
     std::wstring result = L"\"";
     size_t slashes = 0;
     for (wchar_t c : value) {
