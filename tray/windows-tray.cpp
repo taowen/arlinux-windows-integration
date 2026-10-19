@@ -84,7 +84,9 @@ static int task(int argc, wchar_t **argv) {
                 else {
                     const bool maximize = std::wstring(argv[1]) == L"--maximize";
                     const bool zoom = maximize && !IsZoomed(request.window);
-                    ShowWindow(request.window, zoom ? SW_MAXIMIZE : SW_RESTORE);
+                    if (maximize) ShowWindow(request.window, zoom ? SW_MAXIMIZE : SW_RESTORE);
+                    else if (IsIconic(request.window)) ShowWindow(request.window, SW_RESTORE);
+                    else if (!IsWindowVisible(request.window)) ShowWindow(request.window, SW_SHOW);
                     BOOL activated = GetForegroundWindow() == request.window || SetForegroundWindow(request.window);
                     if (!activated) std::fprintf(stderr, "Task foreground activation was denied\n");
                     // Foreground policy is independent of a completed size change.
