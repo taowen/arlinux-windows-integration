@@ -73,15 +73,18 @@ static int task(int argc, wchar_t **argv) {
                     HWND target = activation_window(request.window);
                     // Request activation even if Wine still considers this the
                     // foreground HWND after focus moved to a non-Windows app.
-                    BringWindowToTop(target);
+                    const BOOL raised = BringWindowToTop(target);
                     BOOL activated = GetForegroundWindow() == target || SetForegroundWindow(target);
-                    if (!activated) std::fprintf(stderr, "Task foreground activation was denied\n");
-                    // Foreground policy is independent of a completed size change.
+                    // Wayland mapping and activation complete asynchronously.
+                    // A successful native raise submits that request; an immediate
+                    // foreground snapshot is not its completion result. Returning
+                    // failure here would make Tasks present itself over the target.
                     // ShowWindow's return value is prior visibility, not success.
-                    success = maximize ? (IsZoomed(request.window) != FALSE) == zoom : activated;
-                    std::fprintf(stderr, "Task window control hwnd=%p style=%08lx exstyle=%08lx resized=%d activated=%d\n",
+                    success = maximize ? (IsZoomed(request.window) != FALSE) == zoom :
+                              (raised || activated) && IsWindowVisible(target) && IsWindowEnabled(target);
+                    std::fprintf(stderr, "Task window control hwnd=%p style=%08lx exstyle=%08lx raised=%d resized=%d activated=%d\n",
                                  static_cast<void *>(request.window), GetWindowLongW(request.window, GWL_STYLE),
-                                 GetWindowLongW(request.window, GWL_EXSTYLE), maximize && success, activated);
+                                 GetWindowLongW(request.window, GWL_EXSTYLE), raised, maximize && success, activated);
                 }
             } else std::fprintf(stderr, "Task has no normal owned window (process query error %lu)\n", request.query_error);
         }
