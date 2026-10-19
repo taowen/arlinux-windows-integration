@@ -47,13 +47,16 @@ static std::wstring quote(const std::wstring &value) {
     result.append(slashes * 2, L'\\');
     return result + L'"';
 }
-struct focus_request { HANDLE job; HWND window; LONGLONG area; };
+struct focus_request { HANDLE job; HWND window; LONGLONG area; DWORD query_error; };
 static BOOL CALLBACK find_owned_window(HWND window, LPARAM param) {
     auto *request = reinterpret_cast<focus_request *>(param);
     DWORD pid; GetWindowThreadProcessId(window, &pid);
-    HANDLE process = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, pid);
+    HANDLE process = OpenProcess(PROCESS_QUERY_INFORMATION, FALSE, pid);
     BOOL member = FALSE;
-    if (process) { IsProcessInJob(process, request->job, &member); CloseHandle(process); }
+    if (process) {
+        if (!IsProcessInJob(process, request->job, &member)) request->query_error = GetLastError();
+        CloseHandle(process);
+    } else request->query_error = GetLastError();
     if (!member || GetWindowTextLengthW(window) == 0 || GetWindow(window, GW_OWNER) ||
         (GetWindowLongPtrW(window, GWL_EXSTYLE) & WS_EX_TOOLWINDOW)) return TRUE;
     RECT rect{}; GetWindowRect(window, &rect);
@@ -70,15 +73,16 @@ static int task(int argc, wchar_t **argv) {
         BOOL success = FALSE;
         if (std::wstring(argv[1]) == L"--stop") success = TerminateJobObject(job, 1);
         else {
-            focus_request request{job, nullptr, 0};
+            focus_request request{job, nullptr, 0, 0};
             EnumWindows(find_owned_window, reinterpret_cast<LPARAM>(&request));
             if (request.window) {
                 if (std::wstring(argv[1]) == L"--close-window") success = PostMessageW(request.window, WM_CLOSE, 0, 0);
                 else {
                     ShowWindow(request.window, std::wstring(argv[1]) == L"--maximize" && !IsZoomed(request.window) ? SW_MAXIMIZE : SW_RESTORE);
                     success = SetForegroundWindow(request.window);
+                    if (!success) std::fprintf(stderr, "Task foreground activation was denied\n");
                 }
-            }
+            } else std::fprintf(stderr, "Task has no normal owned window (process query error %lu)\n", request.query_error);
         }
         CloseHandle(job);
         return success ? 0 : 4;
