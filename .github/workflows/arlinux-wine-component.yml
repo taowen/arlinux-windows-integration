@@ -10,12 +10,12 @@ on:
 permissions:
   contents: write
 concurrency:
-  group: arlinux-${{ fromJSON(inputs.request).stage }}-${{ fromJSON(inputs.request).identity }}
+  group: arlinux-${{ fromJSON(inputs.request).stage }}
   cancel-in-progress: false
 jobs:
   component:
     if: ${{ fromJSON(inputs.request).operation != 'release' }}
-    runs-on: ${{ contains(fromJSON('[]'), fromJSON(inputs.request).stage) && 'ubuntu-24.04-arm' || contains(fromJSON('["wine-addons","windows-fonts"]'), fromJSON(inputs.request).stage) && 'windows-latest' || 'ubuntu-24.04' }}
+    runs-on: ${{ contains(fromJSON('[]'), fromJSON(inputs.request).stage) && 'ubuntu-24.04-arm' || contains(fromJSON('["windows-fonts","wine-addons"]'), fromJSON(inputs.request).stage) && 'windows-latest' || 'ubuntu-24.04' }}
     timeout-minutes: 350
     env:
       GH_TOKEN: ${{ github.token }}
