@@ -224,7 +224,32 @@ int main() {
     while (std::getline(std::cin, line)) {
         std::istringstream request(line); std::string operation, argument; unsigned long id = 0;
         request >> operation >> id >> argument;
-        if (operation == "windows") {
+        if (operation == "input-state") {
+            // Read queue ownership without invoking a foreign MSAA provider,
+            // which may itself be blocked on the focus problem being observed.
+            HWND foreground = GetForegroundWindow();
+            HWND selected = id ? reinterpret_cast<HWND>(static_cast<uintptr_t>(id)) : foreground;
+            DWORD process = 0;
+            DWORD thread = GetWindowThreadProcessId(selected, &process);
+            GUITHREADINFO global{}, target{};
+            global.cbSize = sizeof(global);
+            target.cbSize = sizeof(target);
+            BOOL global_ok = GetGUIThreadInfo(0, &global);
+            BOOL target_ok = thread && GetGUIThreadInfo(thread, &target);
+            std::cout << "{\"foreground\":" << reinterpret_cast<uintptr_t>(foreground)
+                << ",\"window\":" << reinterpret_cast<uintptr_t>(selected)
+                << ",\"process\":" << process << ",\"thread\":" << thread
+                << ",\"foregroundQueueAvailable\":" << (global_ok ? "true" : "false")
+                << ",\"foregroundActive\":" << reinterpret_cast<uintptr_t>(global.hwndActive)
+                << ",\"foregroundFocus\":" << reinterpret_cast<uintptr_t>(global.hwndFocus)
+                << ",\"foregroundCapture\":" << reinterpret_cast<uintptr_t>(global.hwndCapture)
+                << ",\"foregroundFlags\":" << global.flags
+                << ",\"targetQueueAvailable\":" << (target_ok ? "true" : "false")
+                << ",\"targetActive\":" << reinterpret_cast<uintptr_t>(target.hwndActive)
+                << ",\"targetFocus\":" << reinterpret_cast<uintptr_t>(target.hwndFocus)
+                << ",\"targetCapture\":" << reinterpret_cast<uintptr_t>(target.hwndCapture)
+                << ",\"targetFlags\":" << target.flags << "}\n";
+        } else if (operation == "windows") {
             bool first = true; std::cout << '[';
             EnumWindows(window_metadata, reinterpret_cast<LPARAM>(&first));
             std::cout << "]\n";
