@@ -10,11 +10,12 @@ on:
 permissions:
   contents: write
 concurrency:
-  group: arlinux-${{ fromJSON(inputs.request).stage }}-${{ fromJSON(inputs.request).identity }}
+  group: arlinux-${{ fromJSON(inputs.request).stage }}
   cancel-in-progress: false
 jobs:
   component:
-    runs-on: ${{ contains(fromJSON('[]'), fromJSON(inputs.request).stage) && 'ubuntu-24.04-arm' || contains(fromJSON('["windows-fonts"]'), fromJSON(inputs.request).stage) && 'windows-latest' || 'ubuntu-24.04' }}
+    if: ${{ fromJSON(inputs.request).operation != 'release' }}
+    runs-on: ${{ contains(fromJSON('[]'), fromJSON(inputs.request).stage) && 'ubuntu-24.04-arm' || contains(fromJSON('["windows-fonts","wine-addons"]'), fromJSON(inputs.request).stage) && 'windows-latest' || 'ubuntu-24.04' }}
     timeout-minutes: 350
     env:
       GH_TOKEN: ${{ github.token }}
@@ -32,16 +33,28 @@ jobs:
         shell: bash
         run: python framework/arlinux/build/github-component.py prepare
       - uses: actions/cache@caa296126883cff596d87d8935842f9db880ef25 # v5
-        if: runner.os == 'Linux' && steps.prepare.outputs.vendor-key != ''
+        if: runner.os == 'Linux' && steps.prepare.outputs.vendor-ndk-key != ''
         with:
-          path: /opt/arlinux/cache/downloads
-          key: arlinux-vendor-${{ runner.arch }}-${{ steps.prepare.outputs.vendor-key }}
+          path: /opt/arlinux/cache/downloads/ndk
+          key: arlinux-tool-${{ runner.arch }}-ndk-${{ steps.prepare.outputs.vendor-ndk-key }}
       - uses: actions/cache@caa296126883cff596d87d8935842f9db880ef25 # v5
-        if: runner.os == 'Linux' && steps.prepare.outputs.cache-paths != ''
+        if: runner.os == 'Linux' && steps.prepare.outputs.vendor-mingw-key != ''
+        with:
+          path: /opt/arlinux/cache/downloads/mingw
+          key: arlinux-tool-${{ runner.arch }}-mingw-${{ steps.prepare.outputs.vendor-mingw-key }}
+      - uses: actions/cache@caa296126883cff596d87d8935842f9db880ef25 # v5
+        if: runner.os == 'Linux' && steps.prepare.outputs.vendor-addons-key != ''
+        with:
+          path: /opt/arlinux/cache/downloads/addons
+          key: arlinux-tool-${{ runner.arch }}-addons-${{ steps.prepare.outputs.vendor-addons-key }}
+      - uses: actions/cache@caa296126883cff596d87d8935842f9db880ef25 # v5
+        if: runner.os == 'Linux' && steps.prepare.outputs.cache-paths != '' && !contains(fromJSON('["wine-pe","wine-bionic"]'), fromJSON(inputs.request).stage)
         with:
           path: ${{ steps.prepare.outputs.cache-paths }}
-          key: arlinux-v2-${{ runner.arch }}-${{ fromJSON(inputs.request).stage }}-${{ fromJSON(inputs.request).identity }}
+          key: arlinux-v4-${{ runner.arch }}-${{ fromJSON(inputs.request).stage }}--${{ fromJSON(inputs.request).identity }}
           restore-keys: |
+            arlinux-v4-${{ runner.arch }}-${{ fromJSON(inputs.request).stage }}--
+            arlinux-v3-${{ runner.arch }}-${{ fromJSON(inputs.request).stage }}-
             arlinux-v2-${{ runner.arch }}-${{ fromJSON(inputs.request).stage }}-
             arlinux-${{ runner.arch }}-${{ fromJSON(inputs.request).stage }}-
       - name: Build through the product dispatcher
@@ -60,3 +73,23 @@ jobs:
         run: |
           script="$ARLINUX_FRAMEWORK/arlinux/build/compact-cache.py"
           if [ -f "$script" ]; then python "$script"; fi
+  release:
+    if: ${{ fromJSON(inputs.request).operation == 'release' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    concurrency:
+      group: arlinux-release-${{ fromJSON(inputs.request).stage }}
+      cancel-in-progress: false
+    env:
+      GH_TOKEN: ${{ github.token }}
+      ARLINUX_COMPONENT_REQUEST: ${{ inputs.request }}
+      PYTHONDONTWRITEBYTECODE: '1'
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          repository: taowen/wine
+          ref: ${{ fromJSON(inputs.request).framework }}
+          path: framework
+          persist-credentials: false
+      - name: Prepare candidate or promote exact tested bytes
+        run: python framework/arlinux/build/public_releases.py
