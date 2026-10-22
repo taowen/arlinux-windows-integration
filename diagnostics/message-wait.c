@@ -54,6 +54,8 @@ int main(int argc, char **argv)
     HWND parent = NULL;
 
     if (argc > 3 && !strcmp(argv[3], "popup")) style = WS_POPUP;
+    if (argc > 3 && !strcmp(argv[3], "popup-caption")) style = WS_POPUP | WS_CAPTION;
+    if (argc > 3 && !strcmp(argv[3], "popup-border")) style = WS_POPUP | WS_BORDER;
     if (argc > 3 && !strcmp(argv[3], "plain")) style = 0;
     if (argc > 3 && !strcmp(argv[3], "message")) parent = HWND_MESSAGE;
 
