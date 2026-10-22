@@ -137,22 +137,27 @@ static void window_tree(HWND window, unsigned long parent, unsigned depth) {
 static BOOL CALLBACK top_window(HWND window, LPARAM) {
     window_tree(window, 0, 0); return TRUE;
 }
-static void emit_window(HWND w, bool &first) {
-    if (!IsWindowVisible(w)) return;
+struct WindowInventory { bool first = true; bool include_hidden = false; };
+static void emit_window(HWND w, WindowInventory &inventory) {
+    if (!inventory.include_hidden && !IsWindowVisible(w)) return;
     wchar_t title[512]{}, cls[256]{};
     GetWindowTextW(w, title, 512); GetClassNameW(w, cls, 256);
     DWORD pid = 0; GetWindowThreadProcessId(w, &pid);
     BSTR name = SysAllocString(title), type = SysAllocString(cls);
-    if (!first) std::cout << ','; first = false;
+    if (!inventory.first) std::cout << ','; inventory.first = false;
     std::cout << "{\"window\":" << reinterpret_cast<uintptr_t>(w)
         << ",\"parent\":" << reinterpret_cast<uintptr_t>(GetParent(w))
         << ",\"process\":" << pid << ",\"name\":" << quote(utf8(name))
-        << ",\"class\":" << quote(utf8(type)) << '}';
+        << ",\"class\":" << quote(utf8(type))
+        << ",\"thread\":" << GetWindowThreadProcessId(w, nullptr)
+        << ",\"visible\":" << (IsWindowVisible(w) ? "true" : "false")
+        << ",\"style\":" << static_cast<DWORD>(GetWindowLongPtrW(w, GWL_STYLE))
+        << ",\"extendedStyle\":" << static_cast<DWORD>(GetWindowLongPtrW(w, GWL_EXSTYLE)) << '}';
     SysFreeString(name); SysFreeString(type);
-    for (auto c = GetWindow(w, GW_CHILD); c; c = GetWindow(c, GW_HWNDNEXT)) emit_window(c, first);
+    for (auto c = GetWindow(w, GW_CHILD); c; c = GetWindow(c, GW_HWNDNEXT)) emit_window(c, inventory);
 }
 static BOOL CALLBACK window_metadata(HWND w, LPARAM param) {
-    emit_window(w, *reinterpret_cast<bool *>(param)); return TRUE;
+    emit_window(w, *reinterpret_cast<WindowInventory *>(param)); return TRUE;
 }
 static bool live(Node *n) {
     DWORD process = 0; GetWindowThreadProcessId(n->window, &process);
@@ -249,9 +254,16 @@ int main() {
                 << ",\"targetFocus\":" << reinterpret_cast<uintptr_t>(target.hwndFocus)
                 << ",\"targetCapture\":" << reinterpret_cast<uintptr_t>(target.hwndCapture)
                 << ",\"targetFlags\":" << target.flags << "}\n";
-        } else if (operation == "windows") {
-            bool first = true; std::cout << '[';
-            EnumWindows(window_metadata, reinterpret_cast<LPARAM>(&first));
+        } else if (operation == "post-null") {
+            // Explicit diagnostic isolation only: wake an observed HWND's queue
+            // without invoking its window procedure or changing window state.
+            HWND selected = reinterpret_cast<HWND>(static_cast<uintptr_t>(id));
+            std::cout << (IsWindow(selected) && PostMessageW(selected, WM_NULL, 0, 0) ? "true\n" : "false\n");
+        } else if (operation == "windows" || operation == "windows-all") {
+            WindowInventory inventory;
+            inventory.include_hidden = operation == "windows-all";
+            std::cout << '[';
+            EnumWindows(window_metadata, reinterpret_cast<LPARAM>(&inventory));
             std::cout << "]\n";
         } else if (operation == "snapshot" || operation == "foreground") {
             // Keep preceding objects alive for clients holding a snapshot while
