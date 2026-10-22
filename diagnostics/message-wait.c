@@ -13,6 +13,24 @@ struct worker
     HRESULT result;
 };
 
+static BOOL inside_create;
+
+static LRESULT CALLBACK window_proc(HWND window, UINT message, WPARAM wp, LPARAM lp)
+{
+    if (message == WM_CREATE && inside_create)
+    {
+        HANDLE ready = CreateEventW(NULL, TRUE, TRUE, NULL);
+        DWORD start = GetTickCount(), result;
+        do
+            result = MsgWaitForMultipleObjects(1, &ready, TRUE, 1, QS_ALLINPUT);
+        while (result == WAIT_TIMEOUT && GetTickCount() - start < 2000);
+        printf("inside_create result=%lu elapsed=%lu queue=%08lx\n", result,
+               GetTickCount() - start, GetQueueStatus(QS_ALLINPUT));
+        CloseHandle(ready);
+    }
+    return DefWindowProcW(window, message, wp, lp);
+}
+
 static DWORD WINAPI initialize(void *arg)
 {
     struct worker *worker = arg;
@@ -58,10 +76,11 @@ int main(int argc, char **argv)
     if (argc > 3 && !strcmp(argv[3], "popup-border")) style = WS_POPUP | WS_BORDER;
     if (argc > 3 && !strcmp(argv[3], "plain")) style = 0;
     if (argc > 3 && !strcmp(argv[3], "message")) parent = HWND_MESSAGE;
+    inside_create = argc > 4 && !strcmp(argv[4], "inside-create");
 
     setvbuf(stdout, NULL, _IONBF, 0);
     worker.audio = argc > 1 && !strcmp(argv[1], "audio");
-    cls.lpfnWndProc = DefWindowProcW;
+    cls.lpfnWndProc = window_proc;
     cls.hInstance = GetModuleHandleW(NULL);
     cls.lpszClassName = L"ARLinuxMessageWaitDiagnostic";
     if (!RegisterClassW(&cls)) return 2;
