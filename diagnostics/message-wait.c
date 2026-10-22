@@ -50,6 +50,12 @@ int main(int argc, char **argv)
     MSG message;
     DWORD start, result = WAIT_TIMEOUT, iterations = 0, status;
     BOOL drain = argc > 2 && !strcmp(argv[2], "drain");
+    DWORD style = WS_OVERLAPPEDWINDOW | WS_CLIPSIBLINGS | WS_CLIPCHILDREN;
+    HWND parent = NULL;
+
+    if (argc > 3 && !strcmp(argv[3], "popup")) style = WS_POPUP;
+    if (argc > 3 && !strcmp(argv[3], "plain")) style = 0;
+    if (argc > 3 && !strcmp(argv[3], "message")) parent = HWND_MESSAGE;
 
     setvbuf(stdout, NULL, _IONBF, 0);
     worker.audio = argc > 1 && !strcmp(argv[1], "audio");
@@ -59,8 +65,7 @@ int main(int argc, char **argv)
     if (!RegisterClassW(&cls)) return 2;
     while (PeekMessageW(&message, NULL, 0, 0, PM_REMOVE)) DispatchMessageW(&message);
     worker.window = CreateWindowExW(WS_EX_WINDOWEDGE, cls.lpszClassName, L"Hidden queue diagnostic",
-                                  WS_OVERLAPPEDWINDOW | WS_CLIPSIBLINGS | WS_CLIPCHILDREN,
-                                  100, 100, 1280, 720, NULL, NULL, cls.hInstance, NULL);
+                                  style, 100, 100, 1280, 720, parent, NULL, cls.hInstance, NULL);
     worker.ready = CreateEventW(NULL, TRUE, FALSE, NULL);
     if (!worker.window || !worker.ready) return 2;
     if (drain)
