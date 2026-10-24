@@ -2,9 +2,6 @@
 // No injected code, simulated mouse clicks, or application-specific control rules.
 #include <windows.h>
 #include <oleacc.h>
-#include <servprov.h>
-#include <uiautomationcore.h>
-#include <uiautomationclient.h>
 #include <cstdio>
 #include <iostream>
 #include <map>
@@ -26,8 +23,6 @@ struct Node {
     std::string name, value, action;
     RECT rect{};
     bool editable = false;
-    bool uia_invoke = false;
-    HRESULT uia_status = E_NOINTERFACE;
     Node() { VariantInit(&child); }
     ~Node() { if (accessible) accessible->Release(); VariantClear(&child); }
 };
@@ -61,40 +56,6 @@ static std::string property(IAccessible *a, VARIANT child, int kind) {
     else a->get_accDefaultAction(child, &value);
     auto result = utf8(value); SysFreeString(value); return result;
 }
-// WinForms can expose UIA patterns through the documented MSAA extension even
-// when its legacy default action is empty. Use that provider, never BM_CLICK
-// on an arbitrary custom class or pointer coordinates from another desktop.
-static HRESULT invoke_provider(IAccessible *a, VARIANT child, IInvokeProvider **out) {
-    *out = nullptr;
-    IServiceProvider *services = nullptr;
-    HRESULT hr = a->QueryInterface(IID_IServiceProvider, reinterpret_cast<void **>(&services));
-    if (FAILED(hr)) return hr;
-    IAccessibleEx *extended = nullptr;
-    hr = services->QueryService(IID_IAccessibleEx, IID_IAccessibleEx, reinterpret_cast<void **>(&extended));
-    services->Release();
-    if (FAILED(hr)) return hr;
-    if (child.vt == VT_I4 && child.lVal != CHILDID_SELF) {
-        IAccessibleEx *descendant = nullptr;
-        hr = extended->GetObjectForChild(child.lVal, &descendant);
-        extended->Release();
-        if (FAILED(hr) || !descendant) return FAILED(hr) ? hr : E_NOINTERFACE;
-        extended = descendant;
-    } else if (child.vt != VT_I4) {
-        extended->Release();
-        return E_INVALIDARG;
-    }
-    IRawElementProviderSimple *provider = nullptr;
-    hr = extended->QueryInterface(IID_IRawElementProviderSimple, reinterpret_cast<void **>(&provider));
-    extended->Release();
-    if (FAILED(hr)) return hr;
-    IUnknown *pattern = nullptr;
-    hr = provider->GetPatternProvider(UIA_InvokePatternId, &pattern);
-    provider->Release();
-    if (FAILED(hr) || !pattern) return FAILED(hr) ? hr : E_NOINTERFACE;
-    hr = pattern->QueryInterface(IID_IInvokeProvider, reinterpret_cast<void **>(out));
-    pattern->Release();
-    return hr;
-}
 static void refresh(Node *n) {
     VARIANT value; VariantInit(&value);
     n->accessible->get_accRole(n->child, &value);
@@ -104,17 +65,6 @@ static void refresh(Node *n) {
     n->name = property(n->accessible, n->child, 0);
     n->value = (n->state & STATE_SYSTEM_PROTECTED) ? "" : property(n->accessible, n->child, 1);
     n->action = property(n->accessible, n->child, 2);
-    n->uia_invoke = false;
-    n->uia_status = E_NOINTERFACE;
-    if (n->action.empty()) {
-        IInvokeProvider *invoke = nullptr;
-        n->uia_status = invoke_provider(n->accessible, n->child, &invoke);
-        if (SUCCEEDED(n->uia_status)) {
-            n->uia_invoke = true;
-            n->action = "Invoke";
-            invoke->Release();
-        }
-    }
     if (GetAncestor(n->window, GA_ROOT) == n->window && n->child.vt == VT_I4 && n->child.lVal == CHILDID_SELF)
         n->action = "Close window";
     if (n->action.empty() && n->child.vt == VT_I4 && n->child.lVal == CHILDID_SELF) {
@@ -132,8 +82,6 @@ static void emit(Node *n) {
               << ",\"process\":" << n->process << ",\"role\":" << n->role
               << ",\"state\":" << n->state << ",\"name\":" << quote(n->name)
               << ",\"value\":" << quote(n->value) << ",\"action\":" << quote(n->action)
-              << ",\"uiaInvoke\":" << (n->uia_invoke ? "true" : "false")
-              << ",\"uiaStatus\":" << static_cast<long>(n->uia_status)
               << ",\"editable\":" << (n->editable ? "true" : "false")
               << ",\"rect\":[" << n->rect.left << ',' << n->rect.top << ','
               << n->rect.right - n->rect.left << ',' << n->rect.bottom - n->rect.top << "]}";
@@ -230,24 +178,19 @@ static bool perform(Node *n, const std::string &operation, const std::string &ar
         VARIANT child; VariantInit(&child); VariantCopy(&child, &n->child);
         auto result = std::make_shared<std::atomic<int>>(-1);
         HWND hwnd = n->window;
-        bool uia_invoke = n->uia_invoke;
-        std::thread([stream, child, result, hwnd, uia_invoke]() mutable {
+        std::thread([stream, child, result, hwnd]() mutable {
             CoInitializeEx(nullptr, COINIT_MULTITHREADED);
             IAccessible *a = nullptr;
             HRESULT hr = CoGetInterfaceAndReleaseStream(stream, IID_IAccessible, reinterpret_cast<void **>(&a));
-            if (SUCCEEDED(hr)) {
-                if (uia_invoke) {
-                    IInvokeProvider *invoke = nullptr;
-                    hr = invoke_provider(a, child, &invoke);
-                    if (SUCCEEDED(hr)) { hr = invoke->Invoke(); invoke->Release(); }
-                } else hr = a->accDoDefaultAction(child);
-                a->Release();
-            }
-            if (!uia_invoke && hr != S_OK && child.vt == VT_I4 && child.lVal == CHILDID_SELF) {
+            if (SUCCEEDED(hr)) { hr = a->accDoDefaultAction(child); a->Release(); }
+            if (hr != S_OK && child.vt == VT_I4 && child.lVal == CHILDID_SELF) {
                 wchar_t cls[128]{}; GetClassNameW(hwnd, cls, 128);
                 if (!_wcsicmp(cls, L"Button")) {
-                    DWORD_PTR value = 0;
-                    hr = SendMessageTimeoutW(hwnd, BM_CLICK, 0, 0, SMTO_ABORTIFHUNG, 3000, &value) ? S_OK : E_FAIL;
+                    // A click can enter a modal loop. Queue it on the owning UI
+                    // thread instead of holding a cross-thread sent message
+                    // open for the lifetime of that dialog. Success means only
+                    // delivery; the caller must verify the resulting UI state.
+                    hr = PostMessageW(hwnd, BM_CLICK, 0, 0) ? S_OK : E_FAIL;
                 }
             }
             result->store(hr == S_OK ? 1 : 0); VariantClear(&child); CoUninitialize(); --pending_actions;
