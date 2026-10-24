@@ -27,6 +27,7 @@ struct Node {
     RECT rect{};
     bool editable = false;
     bool uia_invoke = false;
+    HRESULT uia_status = E_NOINTERFACE;
     Node() { VariantInit(&child); }
     ~Node() { if (accessible) accessible->Release(); VariantClear(&child); }
 };
@@ -104,9 +105,11 @@ static void refresh(Node *n) {
     n->value = (n->state & STATE_SYSTEM_PROTECTED) ? "" : property(n->accessible, n->child, 1);
     n->action = property(n->accessible, n->child, 2);
     n->uia_invoke = false;
+    n->uia_status = E_NOINTERFACE;
     if (n->action.empty()) {
         IInvokeProvider *invoke = nullptr;
-        if (SUCCEEDED(invoke_provider(n->accessible, n->child, &invoke))) {
+        n->uia_status = invoke_provider(n->accessible, n->child, &invoke);
+        if (SUCCEEDED(n->uia_status)) {
             n->uia_invoke = true;
             n->action = "Invoke";
             invoke->Release();
@@ -130,6 +133,7 @@ static void emit(Node *n) {
               << ",\"state\":" << n->state << ",\"name\":" << quote(n->name)
               << ",\"value\":" << quote(n->value) << ",\"action\":" << quote(n->action)
               << ",\"uiaInvoke\":" << (n->uia_invoke ? "true" : "false")
+              << ",\"uiaStatus\":" << static_cast<long>(n->uia_status)
               << ",\"editable\":" << (n->editable ? "true" : "false")
               << ",\"rect\":[" << n->rect.left << ',' << n->rect.top << ','
               << n->rect.right - n->rect.left << ',' << n->rect.bottom - n->rect.top << "]}";
@@ -297,7 +301,13 @@ int main() {
             target.cbSize = sizeof(target);
             BOOL global_ok = GetGUIThreadInfo(0, &global);
             BOOL target_ok = thread && GetGUIThreadInfo(thread, &target);
+            POINT cursor{};
+            BOOL cursor_ok = GetCursorPos(&cursor);
+            HWND pointed = cursor_ok ? WindowFromPoint(cursor) : nullptr;
             std::cout << "{\"foreground\":" << reinterpret_cast<uintptr_t>(foreground)
+                << ",\"cursorAvailable\":" << (cursor_ok ? "true" : "false")
+                << ",\"cursorX\":" << cursor.x << ",\"cursorY\":" << cursor.y
+                << ",\"pointedWindow\":" << reinterpret_cast<uintptr_t>(pointed)
                 << ",\"window\":" << reinterpret_cast<uintptr_t>(selected)
                 << ",\"process\":" << process << ",\"thread\":" << thread
                 << ",\"foregroundQueueAvailable\":" << (global_ok ? "true" : "false")
