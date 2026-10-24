@@ -93,7 +93,26 @@ static void cpp_exception(HANDLE process, EXCEPTION_RECORD *exception)
         uintptr_t pointer;
         if (!read_memory(process, object+i*sizeof(pointer), &pointer, sizeof(pointer))) break;
         printf("  object[%u]=%llx\n", i, (unsigned long long)pointer);
-        if (i) print_string(process, pointer);
+        if (i)
+        {
+            MEMORY_BASIC_INFORMATION memory;
+            unsigned j;
+            print_string(process, pointer);
+            /* Boxed exception payloads can contain a string descriptor rather
+             * than inline text. Retain one bounded level of readable heap
+             * words, without assuming a language ABI or invoking target code. */
+            if (!VirtualQueryEx(process, (void *)pointer, &memory, sizeof(memory)) ||
+                memory.State != MEM_COMMIT || memory.Type != MEM_PRIVATE ||
+                (memory.Protect & (PAGE_GUARD | PAGE_NOACCESS)) ||
+                !(memory.Protect & (PAGE_READONLY | PAGE_READWRITE | PAGE_WRITECOPY))) continue;
+            for (j = 0; j < 4; ++j)
+            {
+                uintptr_t word;
+                if (!read_memory(process, pointer+j*sizeof(word), &word, sizeof(word))) break;
+                printf("  object[%u].word[%u]=%llx\n", i, j, (unsigned long long)word);
+                print_string(process, word);
+            }
+        }
     }
     /* MSVC also throws pointers (e.g. CLR's HRException*). The exception
        storage then contains a pointer, not the object's fields. */
